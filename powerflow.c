@@ -165,6 +165,7 @@ int main() {
         } printf("\n");
 
         // get dP and dQ
+        // TODO: define BMVa (ratio between 1pu V and 1pu MVA) a bit better
         int num_dp = 0; int num_dq = 0;
         for (int i = 0; i < num_buses; i++) {
             struct Node bus = buses[i];
@@ -209,14 +210,14 @@ int main() {
                 // diagonal
                 if (i == k) {
                     struct Polar Y_ii = cart2pol(Y[i + 1][k + 1]);
-                    J[i + num_buses - 1][k]                 =  2 * buses[i + 1].vlf * Y_ii.mag * cos(Y_ii.theta);
-                    J[i + num_buses - 1][k + num_buses - 1] = -2 * buses[i + 1].vlf * Y_ii.mag * sin(Y_ii.theta);
+                    J[i + num_buses - 1][k]                 += 2 * buses[i + 1].vlf * Y_ii.mag * cos(Y_ii.theta);
+                    J[i + num_buses - 1][k + num_buses - 1] -= 2 * buses[i + 1].vlf * Y_ii.mag * sin(Y_ii.theta);
                     for (int b = 0; b < num_buses; b++) {
                         if (b == i + 1) continue;
                         struct Polar Y_ik = cart2pol(Y[i + 1][b]);
                         J[i][k]                                 -= buses[i + 1].vlf * buses[b].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
-                        J[i + num_buses - 1][k]                 += buses[b].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
                         J[i][k + num_buses - 1]                 += buses[i + 1].vlf * buses[b].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
+                        J[i + num_buses - 1][k]                 += buses[b].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
                         J[i + num_buses - 1][k + num_buses - 1] += buses[b].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
                     }
                 }
@@ -224,17 +225,17 @@ int main() {
                 // off-diagonal
                 else {
                     struct Polar Y_ik = cart2pol(Y[i + 1][k + 1]);
-                    J[i][k]                                 =  buses[i + 1].vlf * buses[k + 1].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
-                    J[i + num_buses - 1][k]                 =  buses[i + 1].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
-                    J[i][k + num_buses - 1]                 = -buses[i + 1].vlf * buses[k + 1].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
-                    J[i + num_buses - 1][k + num_buses - 1] =  buses[i + 1].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
+                    J[i][k]                                 += buses[i + 1].vlf * buses[k + 1].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
+                    J[i][k + num_buses - 1]                 -= buses[i + 1].vlf * buses[k + 1].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
+                    J[i + num_buses - 1][k]                 += buses[i + 1].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
+                    J[i + num_buses - 1][k + num_buses - 1] += buses[i + 1].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
                 }
             }
         }
 
         printf("jacobian:\n");
-        for (int y = 0; y < num_dp + num_dq; y++) {
-            for (int x = 0; x < num_dp + num_dq; x++) {
+        for (int y = 0; y < 2 * (num_buses - 1); y++) {
+            for (int x = 0; x < 2 * (num_buses - 1); x++) {
                 printf("%f\t", J[x][y]);
             }
             printf("\n");
