@@ -40,7 +40,10 @@ struct Cart pol2cart(struct Polar in) {
 struct Polar cart2pol(struct Cart in) {
     struct Polar out;
     out.mag = sqrt(pow(in.real, 2) + pow(in.imag, 2));
-    out.theta = atan(in.imag / in.real);
+
+    if (in.real != 0) out.theta = atan(in.imag / in.real);
+    else out.theta = 0;
+
     if (in.real < 0) out.theta += M_PI;
     return out;
 }
@@ -150,8 +153,9 @@ int main() {
 
         for (int i = 0; i < num_buses; i++) {
             for (int k = 0; k < num_buses; k++) {
-                S[i][0].real += buses[i].vlf * buses[k].vlf * ((Y[i][k].real * cos(angles[i][0] - angles[k][0])) + (Y[i][k].imag * sin(angles[i][0] - angles[k][0])));
-                S[i][0].imag += buses[i].vlf * buses[k].vlf * ((Y[i][k].real * sin(angles[i][0] - angles[k][0])) - (Y[i][k].imag * cos(angles[i][0] - angles[k][0])));
+                struct Polar Y_ik = cart2pol(Y[i][k]);
+                S[i][0].real += buses[i].vlf * buses[k].vlf * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
+                S[i][0].imag += buses[i].vlf * buses[k].vlf * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
             }
         }
 
@@ -189,21 +193,30 @@ int main() {
         } printf("\n");
 
         // jacobian
+        // TODO: code currently assumes that 1st node is slack
         // ddP / dTheta
         double J11[num_buses - 1][num_buses - 1] = {{0}};
         for (int i = 0; i < num_buses - 1; i++) {
             for (int k = 0; k < num_buses - 1; k++) {
+
+                // diagonal
                 if (i == k) {
                     for (int b = 0; b < num_buses; b++) {
-                        J11[i][k] += buses[i + 1].vlf * buses[b].vlf * ((-Y[i + 1][b].real * sin(angles[i + 1][0] - angles[b][0])) + (Y[i + 1][b].imag * cos(angles[i + 1][0] - angles[b][0])));
-                    } J11[i][k] -= pow(buses[i + 1].vlf, 2) * Y[i + 1][i + 1].imag;
-                } else {
-                    J11[i][k] = buses[i + 1].vlf * buses[k + 1].vlf * ((Y[i + 1][k + 1].real * sin(angles[i + 1][0] - angles[k + 1][0])) - (Y[i + 1][k + 1].imag * cos(angles[i + 1][0] - angles[k + 1][0])));
+                        if (b == i + 1) continue;
+                        struct Polar Y_ik = cart2pol(Y[i + 1][b]);
+                        J11[i][k] -= buses[i + 1].vlf * buses[b].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
+                    }
+                }
+
+                // off-diagonal
+                else {
+                    struct Polar Y_ik = cart2pol(Y[i + 1][k + 1]);
+                    J11[i][k] = buses[i + 1].vlf * buses[k + 1].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
                 }
             }
         }
 
-        printf("jacobian 1:\n");
+        printf("jacobian 11:\n");
         for (int y = 0; y < num_buses - 1; y++) {
             for (int x = 0; x < num_buses - 1; x++) {
                 printf("%f\t", J11[x][y]);
@@ -211,13 +224,99 @@ int main() {
             printf("\n");
         } printf("\n");
 
-
         // ddP / dV
+        double J12[num_buses - 1][num_buses - 1] = {{0}};
+        for (int i = 0; i < num_buses - 1; i++) {
+            for (int k = 0; k < num_buses - 1; k++) {
+
+                // diagonal
+                if (i == k) {
+                    struct Polar Y_ii = cart2pol(Y[i + 1][k + 1]);
+                    J12[i][k] = 2 * buses[i + 1].vlf * Y_ii.mag * cos(Y_ii.theta);
+                    for (int b = 0; b < num_buses; b++) {
+                        if (b == i + 1) continue;
+                        struct Polar Y_ik = cart2pol(Y[i + 1][b]);
+                        J12[i][k] += buses[b].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
+                    }
+                }
+
+                // off-diagonal
+                else {
+                    struct Polar Y_ik = cart2pol(Y[i + 1][k + 1]);
+                    J12[i][k] = buses[i + 1].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
+                }
+            }
+        }
+
+        printf("jacobian 12:\n");
+        for (int y = 0; y < num_buses - 1; y++) {
+            for (int x = 0; x < num_buses - 1; x++) {
+                printf("%f\t", J12[x][y]);
+            }
+            printf("\n");
+        } printf("\n");
 
         // ddQ / dTheta
+        double J21[num_buses - 1][num_buses - 1] = {{0}};
+        for (int i = 0; i < num_buses - 1; i++) {
+            for (int k = 0; k < num_buses - 1; k++) {
+
+                // diagonal
+                if (i == k) {
+                    for (int b = 0; b < num_buses; b++) {
+                        if (b == i + 1) continue;
+                        struct Polar Y_ik = cart2pol(Y[i + 1][b]);
+                        J21[i][k] += buses[i + 1].vlf * buses[b].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
+                    }
+                }
+
+                // off-diagonal
+                else {
+                    struct Polar Y_ik = cart2pol(Y[i + 1][k + 1]);
+                    J21[i][k] = -buses[i + 1].vlf * buses[k + 1].vlf * Y_ik.mag * cos(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
+                }
+            }
+        }
+
+        printf("jacobian 21:\n");
+        for (int y = 0; y < num_buses - 1; y++) {
+            for (int x = 0; x < num_buses - 1; x++) {
+                printf("%f\t", J21[x][y]);
+            }
+            printf("\n");
+        } printf("\n");
 
         // ddQ / dV
+        double J22[num_buses - 1][num_buses - 1] = {{0}};
+        for (int i = 0; i < num_buses - 1; i++) {
+            for (int k = 0; k < num_buses - 1; k++) {
 
+                // diagonal
+                if (i == k) {
+                    struct Polar Y_ii = cart2pol(Y[i + 1][k + 1]);
+                    J22[i][k] = -2 * buses[i + 1].vlf * Y_ii.mag * sin(Y_ii.theta);
+                    for (int b = 0; b < num_buses; b++) {
+                        if (b == i + 1) continue;
+                        struct Polar Y_ik = cart2pol(Y[i + 1][b]);
+                        J22[i][k] += buses[b].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[b][0] - Y_ik.theta);
+                    }
+                }
+
+                // off-diagonal
+                else {
+                    struct Polar Y_ik = cart2pol(Y[i + 1][k + 1]);
+                    J22[i][k] = buses[i + 1].vlf * Y_ik.mag * sin(angles[i + 1][0] - angles[k + 1][0] - Y_ik.theta);
+                }
+            }
+        }
+
+        printf("jacobian 22:\n");
+        for (int y = 0; y < num_buses - 1; y++) {
+            for (int x = 0; x < num_buses - 1; x++) {
+                printf("%f\t", J22[x][y]);
+            }
+            printf("\n");
+        } printf("\n");
 
     }
 
