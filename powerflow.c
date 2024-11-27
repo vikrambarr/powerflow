@@ -142,15 +142,14 @@ int main() {
     // setup iteration
     double tol = 0.00001;
     int iters = 1;
-    double angles[num_buses][1];
-    struct Cart S[num_buses][1];
-    struct Cart dS[num_buses][1];
-    double dP[num_buses - 1][1];
-    double dQ[num_buses - 1][1];
+    double angles[num_buses][1] = {{0}};
+    struct Cart S[num_buses][1] = {{{.real = 0, .imag = 0}}};
+    struct Cart dS[num_buses][1] = {{{.real = 0, .imag = 0}}};;
+    double dP[num_buses - 1][1] = {{0}};
+    double dQ[num_buses - 1][1] = {{0}};
 
     // iteration
     for (int iter = 0; iter < iters; iter++) {
-
         for (int i = 0; i < num_buses; i++) {
             for (int k = 0; k < num_buses; k++) {
                 struct Polar Y_ik = cart2pol(Y[i][k]);
@@ -168,12 +167,11 @@ int main() {
         // TODO: define BMVa (ratio between 1pu V and 1pu MVA) a bit better
         int num_dp = 0; int num_dq = 0;
         for (int i = 0; i < num_buses; i++) {
-            struct Node bus = buses[i];
-            if (bus.type != 1) {
-                dP[num_dp][0] = bus.injected.real / 100 - S[i][0].real;
+            if (buses[i].type != 1) {
+                dP[num_dp][0] = buses[i].injected.real / 100 - S[i][0].real;
                 num_dp++;
-                if (bus.type != 2) {
-                    dQ[num_dq][0] = bus.injected.imag / 100 - S[i][0].imag;
+                if (buses[i].type != 2) {
+                    dQ[num_dq][0] = buses[i].injected.imag / 100 - S[i][0].imag;
                     num_dq++;
                 }
             }
@@ -194,56 +192,160 @@ int main() {
         } printf("\n");
 
         // jacobian
+        double J[num_dp + num_dq][num_dp + num_dq + 1];
+        for (int x = 0; x < num_dp + num_dq; x++) {
+            J[x][num_dp + num_dq] = M[x][0];
+        }
+        int y; int x;
 
-        double J[2 * (num_buses - 1)][2 * (num_buses - 1)];
-        
-        int x = 0; int y = 0;
+        // J11
+        y = 0; x = 0;
         for (int i = 0; i < num_buses; i++) {
             if (buses[i].type == 1) continue;
             for (int k = 0; k < num_buses; k++) {
                 if (buses[k].type == 1) continue;
-
-                // set to zero
-                J[y][x]                                 = 0;
-                J[y + num_buses - 1][x]                 = 0;
-                J[y][x + num_buses - 1]                 = 0;
-                J[y + num_buses - 1][x + num_buses - 1] = 0;
-
-                // diagonal
+                J[y][x] = 0;
                 if (y == x) {
-                    struct Polar Y_ii = cart2pol(Y[i][k]);
-                    J[y + num_buses - 1][x]                 += 2 * buses[i].vlf * Y_ii.mag * cos(Y_ii.theta);
-                    J[y + num_buses - 1][x + num_buses - 1] -= 2 * buses[i].vlf * Y_ii.mag * sin(Y_ii.theta);
                     for (int b = 0; b < num_buses; b++) {
                         if (b == i) continue;
                         struct Polar Y_ik = cart2pol(Y[i][b]);
-                        J[y][x]                                 -= buses[i].vlf * buses[b].vlf * Y_ik.mag * sin(angles[i][0] - angles[b][0] - Y_ik.theta);
-                        J[y][x + num_buses - 1]                 += buses[i].vlf * buses[b].vlf * Y_ik.mag * cos(angles[i][0] - angles[b][0] - Y_ik.theta);
-                        J[y + num_buses - 1][x]                 += buses[b].vlf * Y_ik.mag * cos(angles[i][0] - angles[b][0] - Y_ik.theta);
-                        J[y + num_buses - 1][x + num_buses - 1] += buses[b].vlf * Y_ik.mag * sin(angles[i][0] - angles[b][0] - Y_ik.theta);
+                        J[y][x] -= buses[i].vlf * buses[b].vlf * Y_ik.mag * sin(angles[i][0] - angles[b][0] - Y_ik.theta);
                     }
                 }
-
-                // off-diagonal
                 else {
                     struct Polar Y_ik = cart2pol(Y[i][k]);
-                    J[y][x]                                 += buses[i].vlf * buses[k].vlf * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
-                    J[y][x + num_buses - 1]                 -= buses[i].vlf * buses[k].vlf * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
-                    J[y + num_buses - 1][x]                 += buses[i].vlf * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
-                    J[y + num_buses - 1][x + num_buses - 1] += buses[i].vlf * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
+                    J[y][x] += buses[i].vlf * buses[k].vlf * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
                 }
                 x++;
             }
-            y++; x=0;
+            y++; x = 0;
+        }
+
+        // J22
+        y = num_dp; x = num_dp;
+        for (int i = 0; i < num_buses; i++) {
+            if (buses[i].type == 1 || buses[i].type == 2) continue;
+            for (int k = 0; k < num_buses; k++) {
+                if (buses[k].type == 1 || buses[k].type == 2) continue;
+                J[y][x] = 0;
+                if (y == x) {
+                    struct Polar Y_ii = cart2pol(Y[i][k]);
+                    J[y][x] -= 2 * buses[i].vlf * Y_ii.mag * sin(Y_ii.theta);
+                    for (int b = 0; b < num_buses; b++) {
+                        if (b == i) continue;
+                        struct Polar Y_ik = cart2pol(Y[i][b]);
+                        J[y][x] += buses[b].vlf * Y_ik.mag * sin(angles[i][0] - angles[b][0] - Y_ik.theta);
+                    }
+                }
+                else {
+                    struct Polar Y_ik = cart2pol(Y[i][k]);
+                    J[y][x] += buses[i].vlf * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
+                }
+                x++;
+            }
+            y++; x = num_dp;
+        }
+
+        // J21
+        y = num_dp; x = 0;
+        for (int i = 0; i < num_buses; i++) {
+            if (buses[i].type == 1 || buses[i].type == 2) continue;
+            for (int k = 0; k < num_buses; k++) {
+                if (buses[k].type == 1) continue;
+                J[y][x] = 0;
+                if (y == x) {
+                    for (int b = 0; b < num_buses; b++) {
+                        if (b == i) continue;
+                        struct Polar Y_ik = cart2pol(Y[i][b]);
+                        J[y][x] += buses[i].vlf * buses[b].vlf * Y_ik.mag * cos(angles[i][0] - angles[b][0] - Y_ik.theta);
+                    }
+                }
+                else {
+                    struct Polar Y_ik = cart2pol(Y[i][k]);
+                    J[y][x] -= buses[i].vlf * buses[k].vlf * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
+                }
+                x++;
+            }
+            y++; x = 0;
+        }
+
+        // J12
+        y = 0; x = num_dp;
+        for (int i = 0; i < num_buses; i++) {
+            if (buses[i].type == 1) continue;
+            for (int k = 0; k < num_buses; k++) {
+                if (buses[k].type == 1 || buses[k].type == 2) continue;
+                J[y][x] = 0;
+                if (y == x) {
+                    struct Polar Y_ii = cart2pol(Y[i][k]);
+                    J[y][x] += 2 * buses[i].vlf * Y_ii.mag * cos(Y_ii.theta);
+                    for (int b = 0; b < num_buses; b++) {
+                        if (b == i) continue;
+                        struct Polar Y_ik = cart2pol(Y[i][b]);
+                        J[y][x] += buses[b].vlf * Y_ik.mag * cos(angles[i][0] - angles[b][0] - Y_ik.theta);
+                    }
+                }
+                else {
+                    struct Polar Y_ik = cart2pol(Y[i][k]);
+                    J[y][x] += buses[i].vlf * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
+                }
+                x++;
+            }
+            y++; x = num_dp;
         }
 
         printf("jacobian:\n");
-        for (int y = 0; y < 2 * (num_buses - 1); y++) {
-            for (int x = 0; x < 2 * (num_buses - 1); x++) {
-                printf("%f\t", J[x][y]);
+        for (int y = 0; y < num_dp + num_dq; y++) {
+            for (int x = 0; x < num_dp + num_dq + 1; x++) {
+                printf("%f\t", J[y][x]);
             }
             printf("\n");
         } printf("\n");
+
+        // linalg solve
+        double solutions[num_dp + num_dq];
+        int n = num_dp + num_dq;
+
+        for (int col = 0; col < n; col++) {
+            // pivoting for numerical stability
+            int max_row = col;
+            for (int i = col + 1; i < n; i++) {
+                if (fabs(J[i][col]) > fabs(J[max_row][col])) {
+                    max_row = i;
+                }
+            }
+            // swap rows
+            if (max_row != col) {
+                for (int j = 0; j <= n; j++) {
+                    double temp = J[col][j];
+                    J[col][j] = J[max_row][j];
+                    J[max_row][j] = temp;
+                }
+            }
+
+            // eliminate below the pivot
+            for (int row = col + 1; row < n; row++) {
+                double factor = J[row][col] / J[col][col];
+                for (int j = col; j <= n; j++) {
+                    J[row][j] -= factor * J[col][j];
+                }
+            }
+        }
+
+        // back substitution
+        for (int i = n - 1; i >= 0; i--) {
+            solutions[i] = J[i][n];
+            for (int j = i + 1; j < n; j++) {
+                solutions[i] -= J[i][j] * solutions[j];
+            }
+            solutions[i] /= J[i][i];
+        }
+
+        printf("solutions\n");
+        for (int x = 0; x < num_dp + num_dq; x++) {
+            printf("%f\n", solutions[x]);
+        } printf("\n");
+        
     }
 
     // calculate powerflow
