@@ -1,23 +1,6 @@
 #include <stdio.h>
 #include <math.h>
-#include "src/complex.h"
-
-struct Node {
-    int num;
-    int type;
-    Polar phasor;
-    Polar loadflow;
-    Cart injected;
-    double minq;
-    double maxq;
-};
-
-struct Line {
-    int from;
-    int to;
-    Cart z;
-    double b_half;
-};
+#include "../include/powerflow.h"
 
 const int num_buses = 3;
 const int num_lines = 2;
@@ -25,14 +8,14 @@ const int num_lines = 2;
 int main() {
 
     // setup inputs
-    struct Node n0 = {0, 1, {1.0, 0.0}, {0.0, 0.0}, { 0.0,  0.0}};
-    struct Node n1 = {1, 2, {1.0, 0.0}, {0.0, 0.0}, { 0.5, -0.2}};
-    struct Node n2 = {2, 3, {1.0, 0.0}, {0.0, 0.0}, {-1.7, -1.7}};
-    struct Node buses[num_buses] = {n0, n1, n2};
+    Node n0 = {0, 1, {1.0, 0.0}, {0.0, 0.0}, { 0.0,  0.0}};
+    Node n1 = {1, 2, {1.0, 0.0}, {0.0, 0.0}, { 0.5, -0.2}};
+    Node n2 = {2, 3, {1.0, 0.0}, {0.0, 0.0}, {-1.7, -1.7}};
+    Node buses[num_buses] = {n0, n1, n2};
 
-    struct Line l0 = {0, 1, {0.1, 0.2}, 0.02};
-    struct Line l1 = {1, 2, {0.05, 0.2}, 0.02};
-    struct Line lines[num_lines] = {l0, l1};
+    Line l0 = {0, 1, {0.1, 0.2}, 0.02};
+    Line l1 = {1, 2, {0.05, 0.2}, 0.02};
+    Line lines[num_lines] = {l0, l1};
 
     // create admittance matrix
     Cart Y[num_buses][num_buses] = {{{.real = 0, .imag = 0}}};
@@ -44,7 +27,7 @@ int main() {
 
         for (int l = 0; l < num_lines; l++) {
 
-            struct Line line = lines[l];
+            Line line = lines[l];
             int from = line.from; int to = line.to;
             Cart admittance = divide(CART_UNITY, line.z);
             Cart admittance_prime = {.real = admittance.real, .imag = admittance.imag + line.b_half};

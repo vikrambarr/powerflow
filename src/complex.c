@@ -1,5 +1,5 @@
 #include <math.h>
-#include "complex.h"
+#include "../include/complex.h"
 
 const Cart CART_UNITY = {.real = 1, .imag = 0};
 const Cart CART_ZERO = {.real = 0, .imag = 0};
