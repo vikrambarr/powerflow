@@ -1,22 +1,13 @@
 #include <stdio.h>
 #include <math.h>
-
-struct Cart {
-    double real;
-    double imag;
-};
-
-struct Polar {
-    double mag;
-    double theta;
-};
+#include "src/complex.h"
 
 struct Node {
     int num;
     int type;
-    struct Polar phasor;
-    struct Polar loadflow;
-    struct Cart injected;
+    Polar phasor;
+    Polar loadflow;
+    Cart injected;
     double minq;
     double maxq;
 };
@@ -24,69 +15,12 @@ struct Node {
 struct Line {
     int from;
     int to;
-    struct Cart z;
+    Cart z;
     double b_half;
 };
 
-struct Cart pol2cart(struct Polar in) {
-    struct Cart out;
-    out.real = in.mag * cos(in.theta);
-    out.imag = in.mag * sin(in.theta);
-    return out;
-}
-
-struct Polar cart2pol(struct Cart in) {
-    struct Polar out;
-    out.mag = sqrt(pow(in.real, 2) + pow(in.imag, 2));
-
-    if (in.real != 0) out.theta = atan(in.imag / in.real);
-    else out.theta = 0;
-
-    if (in.real < 0) out.theta += M_PI;
-    return out;
-}
-
-struct Cart conjugate(struct Cart in) {
-    struct Cart out;
-    out.real = in.real;
-    out.imag = in.imag * -1;
-    return out;
-}
-
-struct Cart multiply(struct Cart a, struct Cart b) {
-    struct Polar out, a_polar, b_polar;
-    a_polar = cart2pol(a); b_polar = cart2pol(b);
-    out.mag = a_polar.mag * b_polar.mag;
-    out.theta = a_polar.theta + b_polar.theta;
-    return pol2cart(out);
-}
-
-struct Cart divide(struct Cart a, struct Cart b) {
-    struct Polar out, a_polar, b_polar;
-    a_polar = cart2pol(a); b_polar = cart2pol(b);
-    out.mag = a_polar.mag / b_polar.mag;
-    out.theta = a_polar.theta - b_polar.theta;
-    return pol2cart(out);
-}
-
-struct Cart add(struct Cart a, struct Cart b) {
-    struct Cart out;
-    out.real = a.real + b.real;
-    out.imag = a.imag + b.imag;
-    return out;
-}
-
-struct Cart subtract(struct Cart a, struct Cart b) {
-    struct Cart out;
-    out.real = a.real - b.real;
-    out.imag = a.imag - b.imag;
-    return out;
-}
-
 const int num_buses = 3;
 const int num_lines = 2;
-struct Cart unity = {.real = 1, .imag = 0};
-struct Cart nothing = {.real = 0, .imag = 0};
 
 int main() {
 
@@ -101,7 +35,7 @@ int main() {
     struct Line lines[num_lines] = {l0, l1};
 
     // create admittance matrix
-    struct Cart Y[num_buses][num_buses] = {{{.real = 0, .imag = 0}}};
+    Cart Y[num_buses][num_buses] = {{{.real = 0, .imag = 0}}};
 
     for (int b = 0; b < num_buses; b++) {
 
@@ -112,8 +46,8 @@ int main() {
 
             struct Line line = lines[l];
             int from = line.from; int to = line.to;
-            struct Cart admittance = divide(unity, line.z);
-            struct Cart admittance_prime = {.real = admittance.real, .imag = admittance.imag + line.b_half};
+            Cart admittance = divide(CART_UNITY, line.z);
+            Cart admittance_prime = {.real = admittance.real, .imag = admittance.imag + line.b_half};
 
             // off-diagonal
             if (b == 0) {
@@ -140,7 +74,7 @@ int main() {
     double tol = 1;
     int iters = 10;
     double angles[num_buses][1] = {{0}};
-    struct Cart S[num_buses][1] = {{{.real = 0, .imag = 0}}};
+    Cart S[num_buses][1] = {{{.real = 0, .imag = 0}}};
     double dP[num_buses - 1][1] = {{0}};
     double dQ[num_buses - 1][1] = {{0}};
 
@@ -150,7 +84,7 @@ int main() {
         for (int i = 0; i < num_buses; i++) {
             S[i][0].real = 0; S[i][0].imag = 0;
             for (int k = 0; k < num_buses; k++) {
-                struct Polar Y_ik = cart2pol(Y[i][k]);
+                Polar Y_ik = cart2pol(Y[i][k]);
                 S[i][0].real += buses[i].loadflow.mag * buses[k].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
                 S[i][0].imag += buses[i].loadflow.mag * buses[k].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
             }
@@ -206,12 +140,12 @@ int main() {
                 if (y == x) {
                     for (int b = 0; b < num_buses; b++) {
                         if (b == i) continue;
-                        struct Polar Y_ik = cart2pol(Y[i][b]);
+                        Polar Y_ik = cart2pol(Y[i][b]);
                         J[y][x] -= buses[i].loadflow.mag * buses[b].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[b][0] - Y_ik.theta);
                     }
                 }
                 else {
-                    struct Polar Y_ik = cart2pol(Y[i][k]);
+                    Polar Y_ik = cart2pol(Y[i][k]);
                     J[y][x] += buses[i].loadflow.mag * buses[k].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
                 }
                 x++;
@@ -227,16 +161,16 @@ int main() {
                 if (buses[k].type == 1 || buses[k].type == 2) continue;
                 J[y][x] = 0;
                 if (y == x) {
-                    struct Polar Y_ii = cart2pol(Y[i][k]);
+                    Polar Y_ii = cart2pol(Y[i][k]);
                     J[y][x] -= 2 * buses[i].loadflow.mag * Y_ii.mag * sin(Y_ii.theta);
                     for (int b = 0; b < num_buses; b++) {
                         if (b == i) continue;
-                        struct Polar Y_ik = cart2pol(Y[i][b]);
+                        Polar Y_ik = cart2pol(Y[i][b]);
                         J[y][x] += buses[b].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[b][0] - Y_ik.theta);
                     }
                 }
                 else {
-                    struct Polar Y_ik = cart2pol(Y[i][k]);
+                    Polar Y_ik = cart2pol(Y[i][k]);
                     J[y][x] += buses[i].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
                 }
                 x++;
@@ -254,12 +188,12 @@ int main() {
                 if (y == x) {
                     for (int b = 0; b < num_buses; b++) {
                         if (b == i) continue;
-                        struct Polar Y_ik = cart2pol(Y[i][b]);
+                        Polar Y_ik = cart2pol(Y[i][b]);
                         J[y][x] += buses[i].loadflow.mag * buses[b].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[b][0] - Y_ik.theta);
                     }
                 }
                 else {
-                    struct Polar Y_ik = cart2pol(Y[i][k]);
+                    Polar Y_ik = cart2pol(Y[i][k]);
                     J[y][x] -= buses[i].loadflow.mag * buses[k].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
                 }
                 x++;
@@ -275,16 +209,16 @@ int main() {
                 if (buses[k].type == 1 || buses[k].type == 2) continue;
                 J[y][x] = 0;
                 if (y == x) {
-                    struct Polar Y_ii = cart2pol(Y[i][k]);
+                    Polar Y_ii = cart2pol(Y[i][k]);
                     J[y][x] += 2 * buses[i].loadflow.mag * Y_ii.mag * cos(Y_ii.theta);
                     for (int b = 0; b < num_buses; b++) {
                         if (b == i) continue;
-                        struct Polar Y_ik = cart2pol(Y[i][b]);
+                        Polar Y_ik = cart2pol(Y[i][b]);
                         J[y][x] += buses[b].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[b][0] - Y_ik.theta);
                     }
                 }
                 else {
-                    struct Polar Y_ik = cart2pol(Y[i][k]);
+                    Polar Y_ik = cart2pol(Y[i][k]);
                     J[y][x] += buses[i].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
                 }
                 x++;
