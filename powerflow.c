@@ -140,17 +140,18 @@ int main() {
     } printf("\n");
 
     // setup iteration
-    double tol = 0.00001;
-    int iters = 1;
+    double tol = 1;
+    int iters = 10;
     double angles[num_buses][1] = {{0}};
     struct Cart S[num_buses][1] = {{{.real = 0, .imag = 0}}};
-    struct Cart dS[num_buses][1] = {{{.real = 0, .imag = 0}}};;
     double dP[num_buses - 1][1] = {{0}};
     double dQ[num_buses - 1][1] = {{0}};
 
     // iteration
     for (int iter = 0; iter < iters; iter++) {
+
         for (int i = 0; i < num_buses; i++) {
+            S[i][0].real = 0; S[i][0].imag = 0;
             for (int k = 0; k < num_buses; k++) {
                 struct Polar Y_ik = cart2pol(Y[i][k]);
                 S[i][0].real += buses[i].vlf * buses[k].vlf * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
@@ -345,7 +346,37 @@ int main() {
         for (int x = 0; x < num_dp + num_dq; x++) {
             printf("%f\n", solutions[x]);
         } printf("\n");
-        
+
+        x = 0;
+        for (int i = 0; i < num_buses; i++) {
+            if (buses[i].type == 1) continue;
+            angles[i][0] += solutions[x];
+            buses[i].thetalf = angles[i][0];
+            x++;
+        }
+
+        for (int i = 0; i < num_buses; i++) {
+            if (buses[i].type == 1 || buses[i].type == 2) continue;
+            buses[i].vlf += solutions[x];
+            x++;
+        }
+
+        int max_mismatch = 0;
+        for (int i = 0; i < num_dp + num_dq; i++) {
+            if (fabs(M[i][0]) > fabs(M[max_mismatch][0])) {
+                max_mismatch = i;
+            }
+        }
+        tol = fabs(M[max_mismatch][0]);
+        printf("tol: %16.15lf\n", tol);
+        printf("vlfs\n");
+        for (int x = 0; x < num_buses; x++) {
+            printf("%f\n", buses[x].vlf);
+        } printf("\n");
+        printf("angles\n");
+        for (int x = 0; x < num_buses; x++) {
+            printf("%f\n", angles[x][0]);
+        } printf("\n");
     }
 
     // calculate powerflow
