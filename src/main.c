@@ -1,9 +1,11 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include "../include/complex.h"
 #include "../include/powerflow.h"
 
-const int num_buses = 3;
-const int num_lines = 2;
+const size_t num_buses = 3;
+const size_t num_lines = 2;
 
 int main() {
 
@@ -29,7 +31,7 @@ int main() {
 
             Line line = lines[l];
             int from = line.from; int to = line.to;
-            Cart admittance = divide(CART_UNITY, line.z);
+            Cart admittance = divide(CART_UNITY, line.impedance);
             Cart admittance_prime = {.real = admittance.real, .imag = admittance.imag + line.b_half};
 
             // off-diagonal

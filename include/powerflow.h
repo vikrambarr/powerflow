@@ -3,7 +3,7 @@
 
 #include "complex.h"
 
-typedef struct {
+typedef struct Node {
     int num;
     int type;
     Polar phasor;
@@ -13,10 +13,10 @@ typedef struct {
     double maxq;
 } Node;
 
-typedef struct {
+typedef struct Line {
     int from;
     int to;
-    Cart z;
+    Cart impedance;
     double b_half;
 } Line;
 

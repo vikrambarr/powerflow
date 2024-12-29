@@ -1,12 +1,12 @@
 #ifndef COMPLEX_H
 #define COMPLEX_H
 
-typedef struct {
+typedef struct Cart {
     double real;
     double imag;
 } Cart;
 
-typedef struct {
+typedef struct Polar {
     double mag;
     double theta;
 } Polar;
