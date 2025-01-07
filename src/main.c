@@ -41,7 +41,7 @@ const Line lines[2] = {
 
 const size_t node_count = 3;
 const size_t line_count = 2;
-const double tolerance = 0.0000001;
+const double tolerance = 1e-10;
 
 int main() {
     // INITIALIZE
@@ -170,7 +170,7 @@ int main() {
             jacobian_matrix[(total_eq_count + 1) * pivot + (total_eq_count)] /= jacobian_matrix[(total_eq_count + 1) * pivot + pivot];
         }
 
-        // STEP VALUES
+        // STEP VALUES & CALCULATE MISMATCH
         for (int eq = 0; eq < total_eq_count; eq++) {
             if (eq < real_eq_count) loadflow[to_node_index[eq]].theta += jacobian_matrix[(total_eq_count + 1) * eq + total_eq_count];
             else loadflow[to_node_index[eq]].mag += jacobian_matrix[(total_eq_count + 1) * eq + total_eq_count];
@@ -180,11 +180,14 @@ int main() {
                 mismatch = fabs(jacobian_matrix[(total_eq_count + 1) * eq + total_eq_count]);
             }
         }
+    }
 
-        printf("%16.15lf\n", mismatch);
+    for (int node = 0; node < node_count; node++) {
+        printf("NODE %d:\nvoltage: %8.4lf ∠%8.4lf°\tpower: %8.4lf %8.4lfj\n\n", node + 1, loadflow[node].mag, loadflow[node].theta * 57.2958, total_power_flows[node].real * 100, total_power_flows[node].imag * 100);
+    }
 
-        for (int i = 0; i < node_count; i++) {
-            printf("%f %f\t", loadflow[i].mag, loadflow[i].theta * 57.2958);
-        } printf("\n");
+    for (int line = 0; line < line_count; line++) {
+        Cart lineflow = subtract(cart_power_flows[node_count * lines[line].from + lines[line].to], cart_power_flows[node_count * lines[line].to + lines[line].from]);
+        printf("LINE %d:\npower: %8.4lf %8.4lfj\n\n", line + 1, lineflow.real * 100, lineflow.imag * 100);
     }
 }
