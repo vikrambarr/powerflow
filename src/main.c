@@ -1,302 +1,190 @@
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 #include <math.h>
 #include "../include/complex.h"
 #include "../include/powerflow.h"
 
-const size_t num_buses = 3;
-const size_t num_lines = 2;
+// DEFINE GRID
+const Node nodes[3] = {
+    {
+        .type = 1,
+        .voltage = {.mag = 1.0, .theta = 0.0},
+        .injected = {.real = 0.0, .imag = 0.0},
+    },
+    {
+        .type = 2,
+        .voltage = {.mag = 1.0, .theta = 0.0},
+        .injected = {.real = 0.5, .imag = -0.2},
+    },
+    {
+        .type = 3,
+        .voltage = {.mag = 1.0, .theta = 0.0},
+        .injected = {.real = -1.7, .imag = -1.7},
+    },
+};
+
+const Line lines[2] = {
+    {
+        .from = 0,
+        .to = 1,
+        .impedance = {.real = 0.1, .imag = 0.2},
+        .b_half = 0.02,
+    },
+    {
+        .from = 1,
+        .to = 2,
+        .impedance = {.real = 0.05, .imag = 0.2},
+        .b_half = 0.02,
+    },
+};
+
+const size_t node_count = 3;
+const size_t line_count = 2;
+const double tolerance = 0.0000001;
 
 int main() {
+    // INITIALIZE
+    Cart cart_admittance_matrix[node_count * node_count];
+    Polar polar_admittance_matrix[node_count * node_count];
 
-    // setup inputs
-    Node n0 = {0, 1, {1.0, 0.0}, {0.0, 0.0}, { 0.0,  0.0}};
-    Node n1 = {1, 2, {1.0, 0.0}, {0.0, 0.0}, { 0.5, -0.2}};
-    Node n2 = {2, 3, {1.0, 0.0}, {0.0, 0.0}, {-1.7, -1.7}};
-    Node buses[num_buses] = {n0, n1, n2};
+    Cart cart_power_flows[node_count * node_count];
+    Polar polar_power_flows[node_count * node_count];
+    Cart total_power_flows[node_count];
 
-    Line l0 = {0, 1, {0.1, 0.2}, 0.02};
-    Line l1 = {1, 2, {0.05, 0.2}, 0.02};
-    Line lines[num_lines] = {l0, l1};
+    double mismatch_matrix[node_count];
+    double jacobian_matrix[(2 * node_count) * ((2 * node_count) - 1)];
 
-    // create admittance matrix
-    Cart Y[num_buses][num_buses] = {{{.real = 0, .imag = 0}}};
+    Polar loadflow[node_count];
+    for (int node = 0; node < node_count; node++) loadflow[node] = nodes[node].voltage;
 
-    for (int b = 0; b < num_buses; b++) {
+    // ADMITTANCE MATRIX
+    memset(cart_admittance_matrix, 0, node_count * node_count * sizeof(Cart));
 
-        // setup buses
-        buses[b].loadflow = buses[b].phasor;
+    for (int line = 0; line < line_count; line++) {
+        int from = lines[line].from; int to = lines[line].to;
+        Cart admittance = divide(CART_UNITY, lines[line].impedance);
+        Cart self_admittance = {.real = admittance.real, .imag = admittance.imag + lines[line].b_half};
 
-        for (int l = 0; l < num_lines; l++) {
+        // OFF-DIAGONAL
+        cart_admittance_matrix[from * node_count + to] = subtract(cart_admittance_matrix[from * node_count + to], admittance);
+        cart_admittance_matrix[to * node_count + from] = subtract(cart_admittance_matrix[to * node_count + from], admittance);
 
-            Line line = lines[l];
-            int from = line.from; int to = line.to;
-            Cart admittance = divide(CART_UNITY, line.impedance);
-            Cart admittance_prime = {.real = admittance.real, .imag = admittance.imag + line.b_half};
-
-            // off-diagonal
-            if (b == 0) {
-                Y[from][to] = subtract(Y[from][to], admittance);
-                Y[to][from] = subtract(Y[to][from], admittance);
-            }
-
-            // diagonal
-            if (line.from == b || line.to == b) {
-                Y[b][b] = add(Y[b][b], admittance_prime);
-            }
-        }
+        // DIAGONAL
+        cart_admittance_matrix[from * node_count + from] = add(cart_admittance_matrix[from * node_count + from], self_admittance);
+        cart_admittance_matrix[to   * node_count + to  ] = add(cart_admittance_matrix[to   * node_count + to  ], self_admittance);
     }
 
-    printf("admittance matrix:\n");
-    for (int y = 0; y < num_buses; y++) {
-        for (int x = 0; x < num_buses; x++) {
-            printf("%f, %fj\t", Y[x][y].real, Y[x][y].imag);
-        }
-        printf("\n");
-    } printf("\n");
+    for (int y = 0; y < node_count * node_count; y++) polar_admittance_matrix[y] = cart2pol(cart_admittance_matrix[y]);
 
-    // setup iteration
-    double tol = 1;
-    int iters = 10;
-    double angles[num_buses][1] = {{0}};
-    Cart S[num_buses][1] = {{{.real = 0, .imag = 0}}};
-    double dP[num_buses - 1][1] = {{0}};
-    double dQ[num_buses - 1][1] = {{0}};
+    // ITERATION
+    int max_iters = 100;
+    double mismatch = tolerance;
+    while (max_iters-- && mismatch >= tolerance) {
 
-    // iteration
-    for (int iter = 0; iter < iters; iter++) {
+        // PRECALCULATE POWER FLOWS
+        for (int k = 0; k < node_count; k++) {
+            total_power_flows[k] = CART_ZERO;
+            for (int n = 0; n < node_count; n++) {
+                int node_index = k * node_count + n;
 
-        for (int i = 0; i < num_buses; i++) {
-            S[i][0].real = 0; S[i][0].imag = 0;
-            for (int k = 0; k < num_buses; k++) {
-                Polar Y_ik = cart2pol(Y[i][k]);
-                S[i][0].real += buses[i].loadflow.mag * buses[k].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
-                S[i][0].imag += buses[i].loadflow.mag * buses[k].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
+                polar_power_flows[node_index].mag = polar_admittance_matrix[node_index].mag * loadflow[k].mag * loadflow[n].mag;
+                polar_power_flows[node_index].theta = loadflow[k].theta - loadflow[n].theta - polar_admittance_matrix[node_index].theta;
+
+                cart_power_flows[node_index] = pol2cart(polar_power_flows[node_index]);
+                total_power_flows[k] = add(total_power_flows[k], cart_power_flows[node_index]);
             }
         }
 
-        printf("s matrix\n");
-        for (int x = 0; x < num_buses; x++) {
-            printf("%f %fj\n", S[x][0].real, S[x][0].imag);
-        } printf("\n");
+        // MISMATCH MATRIX
+        int to_node_index[node_count];
+        int real_eq_count = 0; int imag_eq_count = 0;
 
-        // get dP and dQ
-        // TODO: define BMVa (ratio between 1pu V and 1pu MVA) a bit better
-        int num_dp = 0; int num_dq = 0;
-        for (int i = 0; i < num_buses; i++) {
-            if (buses[i].type != 1) {
-                dP[num_dp][0] = buses[i].injected.real / 100 - S[i][0].real;
-                num_dp++;
-                if (buses[i].type != 2) {
-                    dQ[num_dq][0] = buses[i].injected.imag / 100 - S[i][0].imag;
-                    num_dq++;
+        for (int node = 0; node < node_count * 2; node++) {
+            if (node < node_count) {
+                if (nodes[node].type == 1) continue;
+                to_node_index[real_eq_count] = node;
+                mismatch_matrix[real_eq_count] = nodes[node].injected.real / 100 - total_power_flows[node].real;
+                real_eq_count++;
+            } else {
+                if (nodes[node - node_count].type == 1 || nodes[node - node_count].type == 2) continue;
+                to_node_index[real_eq_count + imag_eq_count] = node - node_count;
+                mismatch_matrix[real_eq_count + imag_eq_count] = nodes[node - node_count].injected.imag / 100 - total_power_flows[node - node_count].imag;
+                imag_eq_count++;
+            }
+        }
+
+        int total_eq_count = real_eq_count + imag_eq_count;
+
+        // JACOBIAN MATRIX
+        for (int r = 0; r < real_eq_count; r++) {
+            for (int c = 0; c < real_eq_count; c++) { // 1ST QUADRANT
+                int k = r; int n = c;
+                jacobian_matrix[(total_eq_count + 1) * k + n] = cart_power_flows[node_count * to_node_index[k] + to_node_index[n]].imag;
+                if (r == c) jacobian_matrix[(total_eq_count + 1) * k + n] -= total_power_flows[to_node_index[k]].imag;
+            }
+            for (int c = 0; c < imag_eq_count; c++) { // 2ND QUADRANT
+                int k = r; int n = c + real_eq_count;
+                jacobian_matrix[(total_eq_count + 1) * k + n] = cart_power_flows[node_count * to_node_index[k] + to_node_index[n]].real / loadflow[to_node_index[n]].mag;
+                if (r == c) jacobian_matrix[(total_eq_count + 1) * k + n] += total_power_flows[to_node_index[k]].real / loadflow[to_node_index[n]].mag;
+            }
+        }
+
+        for (int r = 0; r < imag_eq_count; r++) {
+            for (int c = 0; c < real_eq_count; c++) { // 3RD QUADRANT
+                int k = r + real_eq_count; int n = c;
+                jacobian_matrix[(total_eq_count + 1) * k + n] = -cart_power_flows[node_count * to_node_index[k] + to_node_index[n]].real;
+                if (r == c) jacobian_matrix[(total_eq_count + 1) * k + n] += total_power_flows[to_node_index[k]].real;
+            }
+            for (int c = 0; c < imag_eq_count; c++) { // 4TH QUADRANT
+                int k = r + real_eq_count; int n = c + real_eq_count;
+                jacobian_matrix[(total_eq_count + 1) * k + n] = cart_power_flows[node_count * to_node_index[k] + to_node_index[n]].imag / loadflow[to_node_index[n]].mag;
+                if (r == c) jacobian_matrix[(total_eq_count + 1) * k + n] += total_power_flows[to_node_index[k]].imag / loadflow[to_node_index[n]].mag;
+            }
+        }
+
+        for (int solution = 0; solution < total_eq_count; solution++) {
+            jacobian_matrix[(total_eq_count + 1) * solution + total_eq_count] = mismatch_matrix[solution];
+        }
+
+        // SOLVE LINALG
+        for (int pivot = 0; pivot < total_eq_count - 1; pivot++) {
+            for (int r = pivot + 1; r < total_eq_count; r++) {
+                double ratio = jacobian_matrix[(total_eq_count + 1) * r + pivot] / jacobian_matrix[(total_eq_count + 1) * pivot + pivot];
+                for (int c = pivot; c < total_eq_count + 1; c++) {
+                    jacobian_matrix[(total_eq_count + 1) * r + c] -= jacobian_matrix[(total_eq_count + 1) * pivot + c] * ratio;
                 }
             }
         }
 
-        // create dP dQ matrix
-        double M[num_dp + num_dq][1];
-        for (int dp_eq = 0; dp_eq < num_dp; dp_eq++) {
-            M[dp_eq][0] = dP[dp_eq][0];
-        }
-        for (int dq_eq = 0; dq_eq < num_dq; dq_eq++) {
-            M[dq_eq + num_dp][0] = dQ[dq_eq][0];
-        }
-
-        printf("pq matrix\n");
-        for (int x = 0; x < num_dp + num_dq; x++) {
-            printf("%f\n", M[x][0]);
-        } printf("\n");
-
-        // jacobian
-        double J[num_dp + num_dq][num_dp + num_dq + 1];
-        for (int x = 0; x < num_dp + num_dq; x++) {
-            J[x][num_dp + num_dq] = M[x][0];
-        }
-        int y; int x;
-
-        // J11
-        y = 0; x = 0;
-        for (int i = 0; i < num_buses; i++) {
-            if (buses[i].type == 1) continue;
-            for (int k = 0; k < num_buses; k++) {
-                if (buses[k].type == 1) continue;
-                J[y][x] = 0;
-                if (y == x) {
-                    for (int b = 0; b < num_buses; b++) {
-                        if (b == i) continue;
-                        Polar Y_ik = cart2pol(Y[i][b]);
-                        J[y][x] -= buses[i].loadflow.mag * buses[b].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[b][0] - Y_ik.theta);
-                    }
-                }
-                else {
-                    Polar Y_ik = cart2pol(Y[i][k]);
-                    J[y][x] += buses[i].loadflow.mag * buses[k].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
-                }
-                x++;
-            }
-            y++; x = 0;
-        }
-
-        // J22
-        y = num_dp; x = num_dp;
-        for (int i = 0; i < num_buses; i++) {
-            if (buses[i].type == 1 || buses[i].type == 2) continue;
-            for (int k = 0; k < num_buses; k++) {
-                if (buses[k].type == 1 || buses[k].type == 2) continue;
-                J[y][x] = 0;
-                if (y == x) {
-                    Polar Y_ii = cart2pol(Y[i][k]);
-                    J[y][x] -= 2 * buses[i].loadflow.mag * Y_ii.mag * sin(Y_ii.theta);
-                    for (int b = 0; b < num_buses; b++) {
-                        if (b == i) continue;
-                        Polar Y_ik = cart2pol(Y[i][b]);
-                        J[y][x] += buses[b].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[b][0] - Y_ik.theta);
-                    }
-                }
-                else {
-                    Polar Y_ik = cart2pol(Y[i][k]);
-                    J[y][x] += buses[i].loadflow.mag * Y_ik.mag * sin(angles[i][0] - angles[k][0] - Y_ik.theta);
-                }
-                x++;
-            }
-            y++; x = num_dp;
-        }
-
-        // J21
-        y = num_dp; x = 0;
-        for (int i = 0; i < num_buses; i++) {
-            if (buses[i].type == 1 || buses[i].type == 2) continue;
-            for (int k = 0; k < num_buses; k++) {
-                if (buses[k].type == 1) continue;
-                J[y][x] = 0;
-                if (y == x) {
-                    for (int b = 0; b < num_buses; b++) {
-                        if (b == i) continue;
-                        Polar Y_ik = cart2pol(Y[i][b]);
-                        J[y][x] += buses[i].loadflow.mag * buses[b].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[b][0] - Y_ik.theta);
-                    }
-                }
-                else {
-                    Polar Y_ik = cart2pol(Y[i][k]);
-                    J[y][x] -= buses[i].loadflow.mag * buses[k].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
-                }
-                x++;
-            }
-            y++; x = 0;
-        }
-
-        // J12
-        y = 0; x = num_dp;
-        for (int i = 0; i < num_buses; i++) {
-            if (buses[i].type == 1) continue;
-            for (int k = 0; k < num_buses; k++) {
-                if (buses[k].type == 1 || buses[k].type == 2) continue;
-                J[y][x] = 0;
-                if (y == x) {
-                    Polar Y_ii = cart2pol(Y[i][k]);
-                    J[y][x] += 2 * buses[i].loadflow.mag * Y_ii.mag * cos(Y_ii.theta);
-                    for (int b = 0; b < num_buses; b++) {
-                        if (b == i) continue;
-                        Polar Y_ik = cart2pol(Y[i][b]);
-                        J[y][x] += buses[b].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[b][0] - Y_ik.theta);
-                    }
-                }
-                else {
-                    Polar Y_ik = cart2pol(Y[i][k]);
-                    J[y][x] += buses[i].loadflow.mag * Y_ik.mag * cos(angles[i][0] - angles[k][0] - Y_ik.theta);
-                }
-                x++;
-            }
-            y++; x = num_dp;
-        }
-
-        printf("jacobian:\n");
-        for (int y = 0; y < num_dp + num_dq; y++) {
-            for (int x = 0; x < num_dp + num_dq + 1; x++) {
-                printf("%f\t", J[y][x]);
-            }
-            printf("\n");
-        } printf("\n");
-
-        // linalg solve
-        double solutions[num_dp + num_dq];
-        int n = num_dp + num_dq;
-
-        for (int col = 0; col < n; col++) {
-            // pivoting for numerical stability
-            int max_row = col;
-            for (int i = col + 1; i < n; i++) {
-                if (fabs(J[i][col]) > fabs(J[max_row][col])) {
-                    max_row = i;
-                }
-            }
-            // swap rows
-            if (max_row != col) {
-                for (int j = 0; j <= n; j++) {
-                    double temp = J[col][j];
-                    J[col][j] = J[max_row][j];
-                    J[max_row][j] = temp;
-                }
-            }
-
-            // eliminate below the pivot
-            for (int row = col + 1; row < n; row++) {
-                double factor = J[row][col] / J[col][col];
-                for (int j = col; j <= n; j++) {
-                    J[row][j] -= factor * J[col][j];
+        for (int pivot = total_eq_count - 1; pivot > 0; pivot--) {
+            for (int r = pivot - 1; r >= 0; r--) {
+                double ratio = jacobian_matrix[(total_eq_count + 1) * r + pivot] / jacobian_matrix[(total_eq_count + 1) * pivot + pivot];
+                for (int c = pivot; c < total_eq_count + 1; c++) {
+                    jacobian_matrix[(total_eq_count + 1) * r + c] -= jacobian_matrix[(total_eq_count + 1) * pivot + c] * ratio;
                 }
             }
         }
 
-        // back substitution
-        for (int i = n - 1; i >= 0; i--) {
-            solutions[i] = J[i][n];
-            for (int j = i + 1; j < n; j++) {
-                solutions[i] -= J[i][j] * solutions[j];
-            }
-            solutions[i] /= J[i][i];
+        for (int pivot = 0; pivot < total_eq_count; pivot++) {
+            jacobian_matrix[(total_eq_count + 1) * pivot + (total_eq_count)] /= jacobian_matrix[(total_eq_count + 1) * pivot + pivot];
         }
 
-        printf("solutions\n");
-        for (int x = 0; x < num_dp + num_dq; x++) {
-            printf("%f\n", solutions[x]);
-        } printf("\n");
+        // STEP VALUES
+        for (int eq = 0; eq < total_eq_count; eq++) {
+            if (eq < real_eq_count) loadflow[to_node_index[eq]].theta += jacobian_matrix[(total_eq_count + 1) * eq + total_eq_count];
+            else loadflow[to_node_index[eq]].mag += jacobian_matrix[(total_eq_count + 1) * eq + total_eq_count];
 
-        x = 0;
-        for (int i = 0; i < num_buses; i++) {
-            if (buses[i].type == 1) continue;
-            angles[i][0] += solutions[x];
-            buses[i].loadflow.theta = angles[i][0];
-            x++;
-        }
-
-        for (int i = 0; i < num_buses; i++) {
-            if (buses[i].type == 1 || buses[i].type == 2) continue;
-            buses[i].loadflow.mag += solutions[x];
-            x++;
-        }
-
-        int max_mismatch = 0;
-        for (int i = 0; i < num_dp + num_dq; i++) {
-            if (fabs(M[i][0]) > fabs(M[max_mismatch][0])) {
-                max_mismatch = i;
+            mismatch = 0;
+            if (fabs(jacobian_matrix[(total_eq_count + 1) * eq + total_eq_count]) > fabs(mismatch)) {
+                mismatch = fabs(jacobian_matrix[(total_eq_count + 1) * eq + total_eq_count]);
             }
         }
-        tol = fabs(M[max_mismatch][0]);
-        printf("tol: %16.15lf\n", tol);
-        printf("vlfs\n");
-        for (int x = 0; x < num_buses; x++) {
-            printf("%f\n", buses[x].loadflow.mag);
-        } printf("\n");
-        printf("angles\n");
-        for (int x = 0; x < num_buses; x++) {
-            printf("%f\n", angles[x][0]);
+
+        printf("%16.15lf\n", mismatch);
+
+        for (int i = 0; i < node_count; i++) {
+            printf("%f %f\t", loadflow[i].mag, loadflow[i].theta * 57.2958);
         } printf("\n");
     }
-
-    // calculate powerflow
-
-
-    return 0;
 }

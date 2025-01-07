@@ -6,7 +6,7 @@
 
 Polar *create_loadflow_matrix(Node *nodes, size_t node_count) {
     Polar *loadflow = malloc(node_count * sizeof(Polar));
-    for (int node = 0; node < node_count; node++) loadflow[node] = nodes[node].phasor;
+    for (int node = 0; node < node_count; node++) loadflow[node] = nodes[node].voltage;
     return loadflow;
 }
 

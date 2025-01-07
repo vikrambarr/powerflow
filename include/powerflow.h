@@ -4,10 +4,8 @@
 #include "complex.h"
 
 typedef struct Node {
-    int num;
-    int type;
-    Polar phasor;
-    Polar loadflow;
+    int type; // 1: SLACK, 2: GENERATOR, 3: LOAD
+    Polar voltage;
     Cart injected;
     double minq;
     double maxq;
