@@ -6,7 +6,7 @@
 #include "../include/powerflow.h"
 
 // DEFINE GRID
-const Node nodes[3] = {
+Node nodes[3] = {
     {
         .type = 1,
         .voltage = {.mag = 1.0, .theta = 0.0},
@@ -24,18 +24,18 @@ const Node nodes[3] = {
     },
 };
 
-const Line lines[2] = {
+Line lines[2] = {
     {
         .from = 0,
         .to = 1,
-        .impedance = {.real = 0.1, .imag = 0.2},
-        .b_half = 0.02,
+        .impedance = {.real = 0.001, .imag = 0.002},
+        .b_half = 2,
     },
     {
         .from = 1,
         .to = 2,
-        .impedance = {.real = 0.05, .imag = 0.2},
-        .b_half = 0.02,
+        .impedance = {.real = 0.0005, .imag = 0.002},
+        .b_half = 2,
     },
 };
 
@@ -104,12 +104,12 @@ int main() {
             if (node < node_count) {
                 if (nodes[node].type == 1) continue;
                 to_node_index[real_eq_count] = node;
-                mismatch_matrix[real_eq_count] = nodes[node].injected.real / 100 - total_power_flows[node].real;
+                mismatch_matrix[real_eq_count] = nodes[node].injected.real - total_power_flows[node].real;
                 real_eq_count++;
             } else {
                 if (nodes[node - node_count].type == 1 || nodes[node - node_count].type == 2) continue;
                 to_node_index[real_eq_count + imag_eq_count] = node - node_count;
-                mismatch_matrix[real_eq_count + imag_eq_count] = nodes[node - node_count].injected.imag / 100 - total_power_flows[node - node_count].imag;
+                mismatch_matrix[real_eq_count + imag_eq_count] = nodes[node - node_count].injected.imag - total_power_flows[node - node_count].imag;
                 imag_eq_count++;
             }
         }
@@ -183,11 +183,17 @@ int main() {
     }
 
     for (int node = 0; node < node_count; node++) {
-        printf("NODE %d:\nvoltage: %8.4lf ∠%8.4lf°\tpower: %8.4lf %8.4lfj\n\n", node + 1, loadflow[node].mag, loadflow[node].theta * 57.2958, total_power_flows[node].real * 100, total_power_flows[node].imag * 100);
+        printf("NODE %d:\nvoltage: %8.4lf ∠%8.4lf°\tpower: %8.4lf %8.4lfj\n\n", node + 1, loadflow[node].mag, loadflow[node].theta * 57.2958, total_power_flows[node].real, total_power_flows[node].imag);
     }
 
     for (int line = 0; line < line_count; line++) {
-        Cart lineflow = subtract(cart_power_flows[node_count * lines[line].from + lines[line].to], cart_power_flows[node_count * lines[line].to + lines[line].from]);
-        printf("LINE %d:\npower: %8.4lf %8.4lfj\n\n", line + 1, lineflow.real * 100, lineflow.imag * 100);
+        Cart lineflow = multiply(pol2cart(loadflow[lines[line].from]), multiply(subtract(pol2cart(loadflow[lines[line].from]), pol2cart(loadflow[lines[line].to])), conjugate(cart_admittance_matrix[node_count * lines[line].from + lines[line].to])));
+        printf("LINE %d:\nfrom %d to %d power: %8.4lf %8.4lfj\n\n", line + 1, lines[line].from, lines[line].to, lineflow.real, lineflow.imag);
+    }
+
+    for (int y = 0; y < node_count; y++) {
+        for (int x = 0; x < node_count; x++) {
+            printf("%8.4lf ∠%8.4lf° ", polar_power_flows[node_count * y + x].mag, polar_power_flows[node_count * y + x].theta);
+        } printf("\n");
     }
 }
