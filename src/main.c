@@ -11,16 +11,19 @@ Node nodes[3] = {
         .type = 1,
         .voltage = {.mag = 1.0, .theta = 0.0},
         .injected = {.real = 0.0, .imag = 0.0},
+        .q_min = 0, .q_max = 0,
     },
     {
         .type = 2,
         .voltage = {.mag = 1.0, .theta = 0.0},
-        .injected = {.real = 0.5, .imag = -0.2},
+        .injected = {.real = 0.5, .imag = 0.0},
+        .q_min = -0.2, .q_max = 0.2,
     },
     {
         .type = 3,
         .voltage = {.mag = 1.0, .theta = 0.0},
         .injected = {.real = -1.7, .imag = -1.7},
+        .q_min = 0, .q_max = 0,
     },
 };
 
@@ -78,7 +81,7 @@ int main() {
     for (int y = 0; y < node_count * node_count; y++) polar_admittance_matrix[y] = cart2pol(cart_admittance_matrix[y]);
 
     // ITERATION
-    int max_iters = 100;
+    int max_iters = 1000000;
     double mismatch = tolerance;
     while (max_iters-- && mismatch >= tolerance) {
 
@@ -93,6 +96,25 @@ int main() {
 
                 cart_power_flows[node_index] = pol2cart(polar_power_flows[node_index]);
                 total_power_flows[k] = add(total_power_flows[k], cart_power_flows[node_index]);
+            }
+        }
+
+        // ENFORCE REACTIVE POWER LIMITS
+        for (int node = 0; node < node_count; node++) {
+            if (!nodes[node].q_max && !nodes[node].q_min) continue;
+            if (nodes[node].type == 2) {
+                if (total_power_flows[node].imag > nodes[node].q_max) {
+                    nodes[node].injected.imag = nodes[node].q_max;
+                    nodes[node].type = 3;
+                } if (total_power_flows[node].imag < nodes[node].q_min) {
+                    nodes[node].injected.imag = nodes[node].q_min;
+                    nodes[node].type = 3;
+                }
+            } else if (nodes[node].type == 3) {
+                if (loadflow[node].mag != nodes[node].voltage.mag) {
+                    loadflow[node].mag = nodes[node].voltage.mag;
+                    nodes[node].type = 2;
+                }
             }
         }
 
@@ -183,17 +205,13 @@ int main() {
     }
 
     for (int node = 0; node < node_count; node++) {
-        printf("NODE %d:\nvoltage: %8.4lf ∠%8.4lf°\tpower: %8.4lf %8.4lfj\n\n", node + 1, loadflow[node].mag, loadflow[node].theta * 57.2958, total_power_flows[node].real, total_power_flows[node].imag);
+        printf("NODE %d:\nvoltage: %12.8lf ∠%12.8lf°\tpower: %12.8lf %12.8lfj\n\n", node + 1, loadflow[node].mag, loadflow[node].theta * 57.2958, total_power_flows[node].real, total_power_flows[node].imag);
     }
 
     for (int line = 0; line < line_count; line++) {
         Cart lineflow = multiply(pol2cart(loadflow[lines[line].from]), multiply(subtract(pol2cart(loadflow[lines[line].from]), pol2cart(loadflow[lines[line].to])), conjugate(cart_admittance_matrix[node_count * lines[line].from + lines[line].to])));
-        printf("LINE %d:\nfrom %d to %d power: %8.4lf %8.4lfj\n\n", line + 1, lines[line].from, lines[line].to, lineflow.real, lineflow.imag);
+        printf("LINE %d:\npower from node %d to %d: %12.8lf %12.8lfj\n\n", line + 1, lines[line].from + 1, lines[line].to + 1, lineflow.real, lineflow.imag);
     }
 
-    for (int y = 0; y < node_count; y++) {
-        for (int x = 0; x < node_count; x++) {
-            printf("%8.4lf ∠%8.4lf° ", polar_power_flows[node_count * y + x].mag, polar_power_flows[node_count * y + x].theta);
-        } printf("\n");
-    }
+    printf("%d iterations\n", 999999 - max_iters);
 }

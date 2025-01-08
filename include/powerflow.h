@@ -7,8 +7,8 @@ typedef struct Node {
     int type; // 1: SLACK, 2: GENERATOR, 3: LOAD
     Polar voltage;
     Cart injected;
-    double minq;
-    double maxq;
+    double q_min;
+    double q_max;
 } Node;
 
 typedef struct Line {
